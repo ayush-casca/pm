@@ -427,7 +427,26 @@ async function handlePush(payload: GitHubPushPayload) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body: any;
+    const contentType = request.headers.get('content-type') || '';
+    
+    if (contentType.includes('application/json')) {
+      // JSON payload
+      body = await request.json();
+    } else if (contentType.includes('application/x-www-form-urlencoded')) {
+      // Form-encoded payload (GitHub's default)
+      const formData = await request.text();
+      const params = new URLSearchParams(formData);
+      const payloadString = params.get('payload');
+      if (!payloadString) {
+        throw new Error('No payload found in form data');
+      }
+      body = JSON.parse(payloadString);
+    } else {
+      // Try JSON as fallback
+      body = await request.json();
+    }
+    
     const eventType = request.headers.get('x-github-event') as GitHubWebhookEvent;
 
     console.log(`📥 GitHub webhook: ${eventType}`, {
