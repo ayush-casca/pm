@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { DocumentTextIcon } from '@heroicons/react/24/outline';
+import { DocumentTextIcon, ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 interface DiffViewerProps {
   diff: string;
@@ -9,6 +9,7 @@ interface DiffViewerProps {
 
 export default function DiffViewer({ diff }: DiffViewerProps) {
   const [expandedLines, setExpandedLines] = useState<Set<string>>(new Set());
+  const [expandedFiles, setExpandedFiles] = useState<Set<number>>(new Set());
 
   // Parse the diff into files
   const parseGitDiff = (diffText: string) => {
@@ -63,7 +64,9 @@ export default function DiffViewer({ diff }: DiffViewerProps) {
         }
       }
       // Skip file mode, index, etc.
-      else if (line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
+      else if (line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++') || 
+               line.startsWith('new file mode') || line.startsWith('deleted file mode') ||
+               line.startsWith('similarity index') || line.startsWith('rename from') || line.startsWith('rename to')) {
         continue;
       }
       // Content lines
@@ -92,12 +95,62 @@ export default function DiffViewer({ diff }: DiffViewerProps) {
     }
 
     if (currentChunk && currentFile) currentFile.chunks.push(currentChunk);
-    if (currentFile) files.push(currentFile);
+    if (currentFile) {
+      // For new files without explicit chunks, create a single chunk with all content
+      if (currentFile.chunks.length === 0) {
+        const lines = diffText.split('\n');
+        let inFileContent = false;
+        let fileLines: any[] = [];
+        let lineNum = 1;
+        
+        for (const line of lines) {
+          if (line.startsWith(`diff --git a/${currentFile.filename}`)) {
+            inFileContent = true;
+            continue;
+          }
+          if (inFileContent && line.startsWith('diff --git')) {
+            break; // Next file started
+          }
+          if (inFileContent && (line.startsWith('+') && !line.startsWith('+++'))) {
+            fileLines.push({
+              type: 'add',
+              content: line.slice(1),
+              newLineNumber: lineNum++
+            });
+          }
+        }
+        
+        if (fileLines.length > 0) {
+          currentFile.chunks.push({
+            header: `@@ -0,0 +1,${fileLines.length} @@ New file`,
+            lines: fileLines
+          });
+        }
+      }
+      files.push(currentFile);
+    }
 
     return files;
   };
 
   const files = parseGitDiff(diff);
+
+  const toggleFileExpansion = (fileIndex: number) => {
+    const newExpanded = new Set(expandedFiles);
+    if (newExpanded.has(fileIndex)) {
+      newExpanded.delete(fileIndex);
+    } else {
+      newExpanded.add(fileIndex);
+    }
+    setExpandedFiles(newExpanded);
+  };
+
+  // Expand all files by default if there's only one file, or if there are multiple files, start with them collapsed
+  if (expandedFiles.size === 0 && files.length > 0) {
+    if (files.length === 1) {
+      setExpandedFiles(new Set([0]));
+    }
+  }
 
   if (files.length === 0) {
     return (
@@ -110,19 +163,55 @@ export default function DiffViewer({ diff }: DiffViewerProps) {
   }
 
   return (
-    <div className="divide-y divide-gray-200">
-      {files.map((file, fileIndex) => (
+    <div>
+      {/* Controls for multiple files */}
+      {files.length > 1 && (
+        <div className="p-4 bg-gray-50 border-b flex items-center justify-between">
+          <span className="text-sm text-gray-600">
+            {files.length} files changed
+          </span>
+          <div className="space-x-2">
+            <button
+              onClick={() => setExpandedFiles(new Set(files.map((_, i) => i)))}
+              className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Expand All
+            </button>
+            <button
+              onClick={() => setExpandedFiles(new Set())}
+              className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700"
+            >
+              Collapse All
+            </button>
+          </div>
+        </div>
+      )}
+      
+      <div className="divide-y divide-gray-200">
+        {files.map((file, fileIndex) => (
         <div key={fileIndex} className="bg-white">
           {/* File Header */}
-          <div className="bg-gray-100 border-b px-4 py-2 text-sm font-mono">
+          <div 
+            className="bg-gray-100 border-b px-4 py-2 text-sm font-mono cursor-pointer hover:bg-gray-200"
+            onClick={() => toggleFileExpansion(fileIndex)}
+          >
             <div className="flex items-center space-x-2">
+              {expandedFiles.has(fileIndex) ? (
+                <ChevronDownIcon className="w-4 h-4 text-gray-600" />
+              ) : (
+                <ChevronRightIcon className="w-4 h-4 text-gray-600" />
+              )}
               <DocumentTextIcon className="w-4 h-4 text-gray-600" />
               <span className="font-medium text-gray-900">{file.filename}</span>
+              <span className="text-xs text-gray-500 ml-auto">
+                {file.chunks.length} chunk{file.chunks.length !== 1 ? 's' : ''}
+              </span>
             </div>
           </div>
 
           {/* File Content - Split View */}
-          {file.chunks.map((chunk, chunkIndex) => (
+          {expandedFiles.has(fileIndex) && (
+            file.chunks.map((chunk, chunkIndex) => (
             <div key={chunkIndex}>
               {/* Chunk Header */}
               <div className="bg-blue-50 px-4 py-1 text-xs font-mono text-blue-800 border-y border-blue-200">
@@ -302,9 +391,11 @@ export default function DiffViewer({ diff }: DiffViewerProps) {
                 </div>
               </div>
             </div>
-          ))}
+          ))
+          )}
         </div>
       ))}
+      </div>
     </div>
   );
 }
