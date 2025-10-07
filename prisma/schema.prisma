@@ -206,6 +206,7 @@ model PullRequest {
   author      String   // GitHub username
   authorEmail String?  // If we can map to our users
   url         String   // GitHub PR URL
+  diff        String?  // Full PR diff from GitHub API
   baseBranch  String   @default("main") // Target branch (usually main)
   additions   Int      @default(0)
   deletions   Int      @default(0)
@@ -234,6 +235,7 @@ model Commit {
   author      String   // GitHub username
   authorEmail String?  // If we can map to our users
   url         String   // GitHub commit URL
+  diff        String?  // Full commit diff from GitHub API
   additions   Int      @default(0)
   deletions   Int      @default(0)
   changedFiles Int     @default(0)

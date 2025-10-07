@@ -364,6 +364,7 @@ async function handlePush(payload: GitHubPushPayload) {
   console.log(`🔍 PROCESSING ${commits.length} COMMITS`);
   for (const commit of commits) {
     // Fetch the actual commit diff from GitHub API
+    let commitDiff = null;
     try {
       const commitResponse = await fetch(`https://api.github.com/repos/${repository.full_name}/commits/${commit.id}`, {
         headers: {
@@ -371,18 +372,19 @@ async function handlePush(payload: GitHubPushPayload) {
           'User-Agent': 'PM-Webhook-Bot'
         }
       });
-
-      console.log(`🔍 COMMIT RESPONSE for ${commit.id}:`, commitResponse);
       
       if (commitResponse.ok) {
-        const diffText = await commitResponse.text();
-        console.log(`🔍 COMMIT DIFF for ${commit.id}:`);
-        console.log('=====================================');
-        console.log(diffText);
-        console.log('=====================================');
+        commitDiff = await commitResponse.text();
+        console.log(`✅ Got diff for commit ${commit.id} (${commitDiff.length} chars)`);
+      } else {
+        console.log(`⚠️ API call failed for commit ${commit.id} (${commitResponse.status}), using fallback`);
+        // Fallback: create a basic diff from webhook data
+        commitDiff = `Commit: ${commit.message}\nAuthor: ${commit.author.name}\nFiles changed: ${commit.added.length + commit.modified.length + commit.removed.length}\n\nAdded files:\n${commit.added.join('\n')}\n\nModified files:\n${commit.modified.join('\n')}\n\nRemoved files:\n${commit.removed.join('\n')}`;
       }
     } catch (error) {
       console.log(`❌ Failed to fetch diff for commit ${commit.id}:`, error);
+      // Fallback: create a basic diff from webhook data  
+      commitDiff = `Commit: ${commit.message}\nAuthor: ${commit.author.name}\nFiles changed: ${commit.added.length + commit.modified.length + commit.removed.length}\n\nAdded files:\n${commit.added.join('\n')}\n\nModified files:\n${commit.modified.join('\n')}\n\nRemoved files:\n${commit.removed.join('\n')}`;
     }
 
     // Extract ticket references from commit message
@@ -402,6 +404,7 @@ async function handlePush(payload: GitHubPushPayload) {
       author: commit.author.name,
       authorEmail: commit.author.email,
       url: commit.url,
+      diff: commitDiff,
       additions,
       deletions,
       changedFiles,

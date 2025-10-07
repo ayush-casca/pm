@@ -11,6 +11,8 @@ import {
   ArrowTopRightOnSquareIcon,
   PencilIcon,
   TrashIcon,
+  DocumentTextIcon,
+  EyeIcon,
 } from '@heroicons/react/24/outline';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 
@@ -20,9 +22,12 @@ interface GitHubTabProps {
 }
 
 export function GitHubTab({ projectId, tickets }: GitHubTabProps) {
-  const [activeView, setActiveView] = useState<'prs' | 'commits'>('prs');
+  const [activeView, setActiveView] = useState<'branches' | 'prs'>('branches');
   const [repoName, setRepoName] = useState('');
   const [showRepoInput, setShowRepoInput] = useState(false);
+  const [expandedBranches, setExpandedBranches] = useState<Set<string>>(new Set());
+  const [expandedPRs, setExpandedPRs] = useState<Set<string>>(new Set());
+  const [viewingDiff, setViewingDiff] = useState<{type: 'commit' | 'pr', id: string, data: any} | null>(null);
 
   const { currentUserId } = useCurrentUser();
   const utils = trpc.useUtils();
@@ -112,6 +117,16 @@ export function GitHubTab({ projectId, tickets }: GitHubTabProps) {
 
         <div className="flex bg-gray-100 rounded-lg p-1">
           <button
+            onClick={() => setActiveView('branches')}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              activeView === 'branches'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Branches ({branches.length})
+          </button>
+          <button
             onClick={() => setActiveView('prs')}
             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
               activeView === 'prs'
@@ -120,16 +135,6 @@ export function GitHubTab({ projectId, tickets }: GitHubTabProps) {
             }`}
           >
             Pull Requests ({prs.length})
-          </button>
-          <button
-            onClick={() => setActiveView('commits')}
-            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-              activeView === 'commits'
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            Recent Commits ({commits.slice(0, 20).length})
           </button>
         </div>
       </div>
@@ -218,11 +223,143 @@ export function GitHubTab({ projectId, tickets }: GitHubTabProps) {
         </div>
       ) : null}
 
+      {/* Diff Viewer Modal */}
+      {viewingDiff && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="text-lg font-medium">
+                {viewingDiff.type === 'commit' ? 'Commit Diff' : 'PR Diff'}: {viewingDiff.data.message || viewingDiff.data.title}
+              </h3>
+              <button
+                onClick={() => setViewingDiff(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-4 overflow-auto max-h-[calc(90vh-80px)]">
+              <pre className="text-sm bg-gray-50 p-4 rounded overflow-x-auto whitespace-pre-wrap">
+                {viewingDiff.data.diff || 'No diff available'}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         {isLoading ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        ) : activeView === 'branches' ? (
+          // Branches View
+          <div className="h-full">
+            {branches.length === 0 ? (
+              <div className="text-center py-12">
+                <CodeBracketIcon className="mx-auto h-12 w-12 text-gray-400" />
+                <h3 className="mt-2 text-sm font-medium text-gray-900">No Branches</h3>
+                <p className="mt-1 text-sm text-gray-500">Branches will appear here automatically via GitHub webhooks.</p>
+              </div>
+            ) : (
+              <div className="space-y-4 overflow-y-auto h-full">
+                {branches.map((branch) => (
+                  <div key={branch.id} className="bg-white border border-gray-200 rounded-lg">
+                    <div 
+                      className="p-4 cursor-pointer hover:bg-gray-50"
+                      onClick={() => {
+                        const newExpanded = new Set(expandedBranches);
+                        if (expandedBranches.has(branch.id)) {
+                          newExpanded.delete(branch.id);
+                        } else {
+                          newExpanded.add(branch.id);
+                        }
+                        setExpandedBranches(newExpanded);
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          {expandedBranches.has(branch.id) ? 
+                            <ChevronDownIcon className="w-4 h-4 text-gray-500" /> :
+                            <ChevronRightIcon className="w-4 h-4 text-gray-500" />
+                          }
+                          <h3 className="text-sm font-medium text-gray-900">{branch.name}</h3>
+                          {branch.ticket && (
+                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                              → {branch.ticket.name}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-4 text-xs text-gray-500">
+                          <span>{branch.commits.length} commits</span>
+                          <span>by {branch.author}</span>
+                          <span>{formatTimeAgo(branch.updatedAt)}</span>
+                        </div>
+                      </div>
+                      {branch.description && (
+                        <p className="text-sm text-gray-600 mt-2 ml-7">{branch.description}</p>
+                      )}
+                    </div>
+                    
+                    {/* Expanded Commits */}
+                    {expandedBranches.has(branch.id) && (
+                      <div className="border-t bg-gray-50">
+                        {branch.commits.length === 0 ? (
+                          <div className="p-4 text-center text-sm text-gray-500">No commits yet</div>
+                        ) : (
+                          <div className="divide-y divide-gray-200">
+                            {branch.commits.map((commit) => (
+                              <div key={commit.id} className="p-4 hover:bg-gray-100">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <p className="text-sm font-medium text-gray-900">{commit.message}</p>
+                                    <div className="flex items-center space-x-4 mt-1 text-xs text-gray-500">
+                                      <span>{commit.githubId.substring(0, 7)}</span>
+                                      <span>by {commit.author}</span>
+                                      <span>{formatTimeAgo(commit.createdAt)}</span>
+                                      <span>{commit.changedFiles} files</span>
+                                      {commit.additions > 0 && <span className="text-green-600">+{commit.additions}</span>}
+                                      {commit.deletions > 0 && <span className="text-red-600">-{commit.deletions}</span>}
+                                      {commit.ticket && (
+                                        <span className="text-blue-600">→ {commit.ticket.name}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center space-x-2">
+                                    {commit.diff && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setViewingDiff({type: 'commit', id: commit.id, data: commit});
+                                        }}
+                                        className="text-blue-600 hover:text-blue-800 text-xs"
+                                      >
+                                        <EyeIcon className="w-4 h-4 inline mr-1" />
+                                        View Diff
+                                      </button>
+                                    )}
+                                    <a
+                                      href={commit.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-gray-400 hover:text-gray-600"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <ArrowTopRightOnSquareIcon className="w-4 h-4" />
+                                    </a>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : activeView === 'prs' ? (
           // Pull Requests View
