@@ -363,28 +363,68 @@ async function handlePush(payload: GitHubPushPayload) {
   // Process each commit
   console.log(`🔍 PROCESSING ${commits.length} COMMITS`);
   for (const commit of commits) {
-    // Fetch the actual commit diff from GitHub API
+    // Try to fetch commit diff from GitHub API
     let commitDiff = null;
+    
+    // First try: Individual commit API
     try {
+      const headers: Record<string, string> = {
+        'Accept': 'application/vnd.github.v3.diff',
+        'User-Agent': 'PM-Webhook-Bot'
+      };
+      
+      // Add auth token if available
+      if (process.env.GITHUB_TOKEN) {
+        headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
+      }
+      
       const commitResponse = await fetch(`https://api.github.com/repos/${repository.full_name}/commits/${commit.id}`, {
-        headers: {
-          'Accept': 'application/vnd.github.v3.diff',
-          'User-Agent': 'PM-Webhook-Bot'
-        }
+        headers
       });
       
       if (commitResponse.ok) {
         commitDiff = await commitResponse.text();
         console.log(`✅ Got diff for commit ${commit.id} (${commitDiff.length} chars)`);
       } else {
-        console.log(`⚠️ API call failed for commit ${commit.id} (${commitResponse.status}), using fallback`);
-        // Fallback: create a basic diff from webhook data
-        commitDiff = `Commit: ${commit.message}\nAuthor: ${commit.author.name}\nFiles changed: ${commit.added.length + commit.modified.length + commit.removed.length}\n\nAdded files:\n${commit.added.join('\n')}\n\nModified files:\n${commit.modified.join('\n')}\n\nRemoved files:\n${commit.removed.join('\n')}`;
+        console.log(`⚠️ Individual commit API failed (${commitResponse.status}), trying compare API...`);
+        
+        // Second try: Use the compare URL from webhook payload
+        if (payload.compare) {
+          const compareResponse = await fetch(`${payload.compare}.diff`, {
+            headers: {
+              'User-Agent': 'PM-Webhook-Bot'
+            }
+          });
+          
+          if (compareResponse.ok) {
+            const fullDiff = await compareResponse.text();
+            console.log(`✅ Got compare diff (${fullDiff.length} chars)`);
+            
+            // Extract this specific commit's changes from the full diff
+            // For now, use the full diff since it might contain all changes
+            commitDiff = `Full Push Diff (${payload.commits.length} commits):\n\n${fullDiff}`;
+          } else {
+            console.log(`⚠️ Compare API also failed (${compareResponse.status}), using enhanced fallback`);
+          }
+        }
       }
     } catch (error) {
-      console.log(`❌ Failed to fetch diff for commit ${commit.id}:`, error);
-      // Fallback: create a basic diff from webhook data  
-      commitDiff = `Commit: ${commit.message}\nAuthor: ${commit.author.name}\nFiles changed: ${commit.added.length + commit.modified.length + commit.removed.length}\n\nAdded files:\n${commit.added.join('\n')}\n\nModified files:\n${commit.modified.join('\n')}\n\nRemoved files:\n${commit.removed.join('\n')}`;
+      console.log(`❌ Failed to fetch any diff for commit ${commit.id}:`, error);
+    }
+    
+    // Enhanced fallback with more details
+    if (!commitDiff) {
+      commitDiff = `Commit: ${commit.message}
+Author: ${commit.author.name} <${commit.author.email}>
+SHA: ${commit.id}
+Timestamp: ${commit.timestamp}
+
+Files changed: ${commit.added.length + commit.modified.length + commit.removed.length}
+
+${commit.added.length > 0 ? `Added files (${commit.added.length}):\n${commit.added.map(f => `+ ${f}`).join('\n')}\n\n` : ''}${commit.modified.length > 0 ? `Modified files (${commit.modified.length}):\n${commit.modified.map(f => `~ ${f}`).join('\n')}\n\n` : ''}${commit.removed.length > 0 ? `Removed files (${commit.removed.length}):\n${commit.removed.map(f => `- ${f}`).join('\n')}\n\n` : ''}GitHub URL: ${commit.url}
+Compare URL: ${payload.compare}
+
+Note: Full diff not available (private repo requires authentication)`;
     }
 
     // Extract ticket references from commit message
