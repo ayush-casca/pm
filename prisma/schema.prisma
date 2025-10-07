@@ -1,0 +1,254 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// User model
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      String?   // "PM", "Engineer", "Designer", etc.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  projectUsers     ProjectUser[]
+  assignedTickets  Assignee[]
+  comments         TicketComment[]
+  transcripts      Transcript[]
+  createdTickets   Ticket[] @relation("CreatorTickets")
+  auditLogs        AuditLog[]
+  ticketUpdates    TicketUpdate[]
+  githubBranches   GitHubBranch[]
+  pullRequests     PullRequest[]
+  commits          Commit[]
+}
+
+// Project model
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // GitHub integration
+  githubRepoUrl String?  // Optional GitHub repo URL
+  githubRepoName String? // e.g., "owner/repo-name"
+  
+  // Relations
+  projectUsers   ProjectUser[]
+  tickets        Ticket[]
+  transcripts    Transcript[]
+  auditLogs      AuditLog[]
+  githubBranches GitHubBranch[]
+  pullRequests   PullRequest[]
+  commits        Commit[]
+}
+
+// Ticket model
+model Ticket {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  citations     String?  // JSON string for now
+  creatorStatus      String?   // "pending", "approved", "rejected"
+  ticketStatus  String?   // "todo", "in_progress", "done"
+  priority      String?  // "high", "medium", "low"
+  dueDate       DateTime?
+  githubUrl     String?  // Simple GitHub URL field
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id])
+  creatorId          String?
+  creator            User?    @relation("CreatorTickets", fields: [creatorId], references: [id])
+  transcriptId  String?
+  transcript    Transcript? @relation(fields: [transcriptId], references: [id])
+
+  isManualCreated Boolean @default(false)
+  
+  assignees      Assignee[]
+  comments       TicketComment[]
+  updates        TicketUpdate[]
+  githubBranches GitHubBranch[]
+  pullRequests   PullRequest[]
+  commits        Commit[]
+}
+
+// Transcript model
+model Transcript {
+  id              String   @id @default(cuid())
+  name            String
+  content         String
+  aiAnalysis      String?  // AI processing results
+  processingStatus String  @default("pending") // "pending", "processing", "completed", "failed"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id])
+  uploaderId      String
+  uploader        User     @relation(fields: [uploaderId], references: [id])
+  tickets         Ticket[]
+}
+
+// Audit Log model
+model AuditLog {
+  id          String   @id @default(cuid())
+  header      String
+  description String
+  createdAt   DateTime @default(now())
+  
+  // Relations
+  projectId   String
+  project     Project @relation(fields: [projectId], references: [id])
+  userId      String
+  user        User    @relation(fields: [userId], references: [id])
+}
+
+// Ticket Update model
+model TicketUpdate {
+  id          String   @id @default(cuid())
+  prevStatus  String
+  afterStatus String
+  description String
+  createdAt   DateTime @default(now())
+  
+  // Relations
+  ticketId    String
+  ticket      Ticket @relation(fields: [ticketId], references: [id])
+  userId      String
+  user        User   @relation(fields: [userId], references: [id])
+}
+
+// Join tables
+model ProjectUser {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  role      String   // "admin", "pm", "engineer"
+  createdAt DateTime @default(now())
+  
+  project   Project @relation(fields: [projectId], references: [id])
+  user      User    @relation(fields: [userId], references: [id])
+  
+  @@unique([projectId, userId])
+}
+
+model Assignee {
+  id       String   @id @default(cuid())
+  ticketId String
+  userId   String
+  createdAt DateTime @default(now())
+  
+  ticket   Ticket @relation(fields: [ticketId], references: [id])
+  user     User   @relation(fields: [userId], references: [id])
+  
+  @@unique([ticketId, userId])
+}
+
+model TicketComment {
+  id       String   @id @default(cuid())
+  content  String
+  createdAt DateTime @default(now())
+  
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id])
+  userId   String
+  user     User   @relation(fields: [userId], references: [id])
+}
+
+// GitHub Branch model (main entity)
+model GitHubBranch {
+  id          String   @id @default(cuid())
+  name        String   // Branch name (e.g., "feature/user-auth")
+  description String?  // Optional description of what this branch is for
+  url         String   // GitHub branch URL
+  author      String   // Who created the branch
+  authorEmail String?  // If we can map to our users
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  projectId    String
+  project      Project        @relation(fields: [projectId], references: [id])
+  ticketId     String?        // Optional - branch might be linked to ticket
+  ticket       Ticket?        @relation(fields: [ticketId], references: [id])
+  userId       String?        // Our internal user if mapped
+  user         User?          @relation(fields: [userId], references: [id])
+  pullRequests PullRequest[]  // PRs created from this branch
+  commits      Commit[]       // Commits on this branch
+  
+  @@unique([projectId, name]) // Unique branch name per project
+}
+
+// GitHub Pull Request model
+model PullRequest {
+  id          String   @id @default(cuid())
+  githubId    Int      // GitHub PR number
+  title       String
+  body        String?
+  state       String   // "open", "closed", "draft"
+  merged      Boolean  @default(false)
+  author      String   // GitHub username
+  authorEmail String?  // If we can map to our users
+  url         String   // GitHub PR URL
+  baseBranch  String   @default("main") // Target branch (usually main)
+  additions   Int      @default(0)
+  deletions   Int      @default(0)
+  changedFiles Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  projectId     String
+  project       Project      @relation(fields: [projectId], references: [id])
+  branchId      String       // PR is created FROM a branch
+  branch        GitHubBranch @relation(fields: [branchId], references: [id])
+  ticketId      String?      // Optional - might not be linked initially
+  ticket        Ticket?      @relation(fields: [ticketId], references: [id])
+  userId        String?      // Our internal user if mapped
+  user          User?        @relation(fields: [userId], references: [id])
+  
+  @@unique([projectId, githubId]) // Unique per project
+}
+
+// GitHub Commit model  
+model Commit {
+  id          String   @id @default(cuid())
+  githubId    String   // GitHub commit SHA
+  message     String
+  author      String   // GitHub username
+  authorEmail String?  // If we can map to our users
+  url         String   // GitHub commit URL
+  additions   Int      @default(0)
+  deletions   Int      @default(0)
+  changedFiles Int     @default(0)
+  createdAt   DateTime @default(now())
+  
+  // Relations
+  projectId    String
+  project      Project      @relation(fields: [projectId], references: [id])
+  branchId     String       // Commit belongs to a branch
+  branch       GitHubBranch @relation(fields: [branchId], references: [id])
+  ticketId     String?      // Optional - might not be linked initially
+  ticket       Ticket?      @relation(fields: [ticketId], references: [id])
+  userId       String?      // Our internal user if mapped
+  user         User?        @relation(fields: [userId], references: [id])
+  
+  @@unique([projectId, githubId]) // Unique per project
+}
+
