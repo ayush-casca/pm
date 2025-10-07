@@ -7,9 +7,17 @@ export const userRouter = router({
   // Get all users
   getAll: publicProcedure
     .query(async () => {
-      return await prisma.user.findMany({
-        orderBy: { createdAt: 'desc' },
-      });
+      try {
+        console.log('🔍 Fetching all users...');
+        const users = await prisma.user.findMany({
+          orderBy: { createdAt: 'desc' },
+        });
+        console.log(`✅ Found ${users.length} users`);
+        return users;
+      } catch (error) {
+        console.error('❌ Error fetching users:', error);
+        throw error;
+      }
     }),
 
   // Get user by ID
@@ -62,16 +70,24 @@ export const userRouter = router({
   // Get all projects
   getProjects: publicProcedure
     .query(async () => {
-      return await prisma.project.findMany({
-        include: {
-          projectUsers: {
-            include: {
-              user: true,
+      try {
+        console.log('🔍 Fetching all projects...');
+        const projects = await prisma.project.findMany({
+          include: {
+            projectUsers: {
+              include: {
+                user: true,
+              },
             },
           },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+          orderBy: { createdAt: 'desc' },
+        });
+        console.log(`✅ Found ${projects.length} projects`);
+        return projects;
+      } catch (error) {
+        console.error('❌ Error fetching projects:', error);
+        throw error;
+      }
     }),
 
   // Create project

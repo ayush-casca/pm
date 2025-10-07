@@ -247,24 +247,33 @@ export const githubRouter = router({
   // Update project GitHub repo
   updateProjectRepo: publicProcedure
     .input(z.object({
-      projectId: z.string(),
+      id: z.string(),
       githubRepoUrl: z.string().optional(),
       githubRepoName: z.string().optional(),
       userId: z.string(),
     }))
     .mutation(async ({ input }) => {
-      const { userId, ...updateData } = input;
+      const { userId, id, ...updateData } = input;
+
+      console.log('🔍 Updating project repo:', updateData);
+      let project;
+
+      try {
       
-      const project = await prisma.project.update({
-        where: { id: input.projectId },
+      project = await prisma.project.update({
+        where: { id },
         data: updateData,
       });
+      } catch (error) {
+        console.error('❌ Error updating project repo:', error);
+        throw error;
+      }
 
       // Log repo linking
       if (updateData.githubRepoUrl) {
         await logAuditEvent({
           userId,
-          projectId: input.projectId,
+          projectId: id,
           header: 'GitHub Repository Linked',
           description: `Linked GitHub repository: ${updateData.githubRepoName || updateData.githubRepoUrl}`,
         });
