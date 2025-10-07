@@ -270,7 +270,7 @@ export const githubRouter = router({
       }
 
       // Log repo linking
-      if (updateData.githubRepoUrl) {
+      if (updateData.githubRepoUrl || updateData.githubRepoName) {
         await logAuditEvent({
           userId,
           projectId: id,

@@ -30,6 +30,15 @@ export function GitHubTab({ projectId, tickets }: GitHubTabProps) {
   // Get current project to check if repo is linked
   const { data: project } = trpc.user.getProjects.useQuery();
   const currentProject = project?.find(p => p.id === projectId);
+  
+  // Debug logging
+  console.log('🔍 GitHubTab Debug:', {
+    projectId,
+    allProjects: project?.map(p => ({ id: p.id, name: p.name, githubRepoName: p.githubRepoName })),
+    currentProject: currentProject ? { id: currentProject.id, name: currentProject.name, githubRepoName: currentProject.githubRepoName } : null,
+    showRepoInput,
+    repoName
+  });
 
   // Update project repo mutation
   const updateProjectRepo = trpc.github.updateProjectRepo.useMutation({
@@ -126,13 +135,14 @@ export function GitHubTab({ projectId, tickets }: GitHubTabProps) {
       </div>
 
       {/* Repository Link Section */}
-      {!currentProject?.githubRepoName ? (
+      {(!currentProject?.githubRepoName || showRepoInput) ? (
         <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-sm font-medium text-yellow-800">Link GitHub Repository</h3>
               <p className="text-sm text-yellow-600 mt-1">
-                Connect this project to a GitHub repository to enable webhook automation
+                Enter the repository name (owner/repo) to enable webhook automation.<br />
+                <span className="text-xs">Example: ayush-casca/pm (not the full URL)</span>
               </p>
             </div>
             {!showRepoInput ? (
@@ -147,10 +157,11 @@ export function GitHubTab({ projectId, tickets }: GitHubTabProps) {
               <div className="flex items-center space-x-2">
                 <input
                   type="text"
-                  placeholder="owner/repo-name (e.g., ayushRana48/tRepo)"
+                  placeholder="owner/repo-name (e.g., ayush-casca/pm)"
                   value={repoName}
                   onChange={(e) => setRepoName(e.target.value)}
                   className="px-3 py-2 border border-gray-300 rounded-md text-sm w-64"
+                  title="Enter repository name in format: owner/repo-name (NOT the full URL)"
                 />
                 <button
                   onClick={() => {
@@ -180,7 +191,7 @@ export function GitHubTab({ projectId, tickets }: GitHubTabProps) {
             )}
           </div>
         </div>
-      ) : (
+      ) : !showRepoInput ? (
         <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
           <div className="flex items-center justify-between">
             <div>
@@ -191,7 +202,11 @@ export function GitHubTab({ projectId, tickets }: GitHubTabProps) {
             </div>
             <button
               onClick={() => {
-                setRepoName(currentProject.githubRepoName || '');
+                console.log('🔧 Edit button clicked!', {
+                  currentProject: currentProject?.githubRepoName,
+                  showRepoInput,
+                });
+                setRepoName(currentProject?.githubRepoName || '');
                 setShowRepoInput(true);
               }}
               className="text-green-600 hover:text-green-800 text-sm font-medium"
@@ -201,7 +216,7 @@ export function GitHubTab({ projectId, tickets }: GitHubTabProps) {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">

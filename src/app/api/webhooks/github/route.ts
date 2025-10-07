@@ -101,6 +101,19 @@ function extractTicketReferences(text: string): string[] {
 
 // Find project by repository name
 async function findProjectByRepo(repoName: string) {
+  console.log('🔍 Looking for repo:', repoName);
+
+  const allProjects = await prisma.project.findMany({
+    select: {
+      id: true,
+      name: true,
+      githubRepoName: true,
+      githubRepoUrl: true
+    }
+  });
+
+  console.log('📋 All projects:', allProjects);
+  
   return await prisma.project.findFirst({
     where: {
       OR: [
