@@ -8,7 +8,7 @@ import { CreateTicketModal } from './components/CreateTicketModal';
 import { TicketViewModal } from './components/TicketViewModal';
 import { TicketTable } from './components/TicketTable';
 import { TranscriptsTab } from './components/TranscriptsTab';
-import { GitHubTab } from './components/GitHubTab';
+import GitHubTab from './components/GitHubTab';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 export default function ProjectsPage() {
