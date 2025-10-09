@@ -211,6 +211,10 @@ model PullRequest {
   additions   Int      @default(0)
   deletions   Int      @default(0)
   changedFiles Int     @default(0)
+  
+  // AI Analysis (JSON format for flexibility)
+  aiAnalysis  String?  // JSON: { summary, impact, complexity, businessValue, etc. }
+  
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
@@ -239,6 +243,10 @@ model Commit {
   additions   Int      @default(0)
   deletions   Int      @default(0)
   changedFiles Int     @default(0)
+  
+  // AI Analysis (JSON format for flexibility)
+  aiAnalysis  String?  // JSON: { summary, impact, complexity, etc. }
+  
   createdAt   DateTime @default(now())
   
   // Relations

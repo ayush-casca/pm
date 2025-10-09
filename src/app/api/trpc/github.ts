@@ -344,4 +344,101 @@ export const githubRouter = router({
 
       return { success: true };
     }),
+
+  // AI Analysis mutations
+  analyzeCommit: publicProcedure
+    .input(z.object({
+      commitId: z.string(),
+      userId: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      const { analyzeCommit } = await import('@/lib/ai-analysis');
+      
+      const commit = await prisma.commit.findUnique({
+        where: { id: input.commitId },
+        include: { project: true },
+      });
+
+      if (!commit) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Commit not found' });
+      }
+
+      if (!commit.diff) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'No diff available for analysis' });
+      }
+
+      // Get project context
+      const projectContext = `${commit.project.name}: ${commit.project.description || 'No description'}`;
+      
+      // Analyze the commit
+      const analysis = await analyzeCommit(commit.message, commit.diff, projectContext);
+
+      // Update the commit with AI analysis
+      const updatedCommit = await prisma.commit.update({
+        where: { id: input.commitId },
+        data: {
+          aiAnalysis: JSON.stringify(analysis),
+        },
+      });
+
+      // Log the analysis
+      await logAuditEvent({
+        userId: input.userId,
+        projectId: commit.projectId,
+        header: 'AI Analysis Generated',
+        description: `Generated AI analysis for commit: ${analysis.summary}`,
+      });
+
+      return { commit: updatedCommit, analysis };
+    }),
+
+  analyzePR: publicProcedure
+    .input(z.object({
+      prId: z.string(),
+      userId: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      const { analyzePR } = await import('@/lib/ai-analysis');
+      
+      const pr = await prisma.pullRequest.findUnique({
+        where: { id: input.prId },
+        include: { 
+          project: true,
+          commits: true,
+        },
+      });
+
+      if (!pr) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Pull request not found' });
+      }
+
+      if (!pr.diff) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'No diff available for analysis' });
+      }
+
+      // Get project context and commit messages
+      const projectContext = `${pr.project.name}: ${pr.project.description || 'No description'}`;
+      const commitMessages = pr.commits.map(c => c.message);
+      
+      // Analyze the PR
+      const analysis = await analyzePR(pr.title, pr.body, pr.diff, commitMessages, projectContext);
+
+      // Update the PR with AI analysis
+      const updatedPR = await prisma.pullRequest.update({
+        where: { id: input.prId },
+        data: {
+          aiAnalysis: JSON.stringify(analysis),
+        },
+      });
+
+      // Log the analysis
+      await logAuditEvent({
+        userId: input.userId,
+        projectId: pr.projectId,
+        header: 'AI Analysis Generated',
+        description: `Generated AI analysis for PR: ${analysis.summary}`,
+      });
+
+      return { pr: updatedPR, analysis };
+    }),
 });
