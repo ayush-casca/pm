@@ -37,7 +37,12 @@ export default function DiffViewer({ diff }: DiffViewerProps) {
     for (const line of lines) {
       // File header: diff --git a/file b/file
       if (line.startsWith('diff --git')) {
-        if (currentFile) files.push(currentFile);
+        // Finish the previous file
+        if (currentFile) {
+          if (currentChunk) currentFile.chunks.push(currentChunk);
+          files.push(currentFile);
+        }
+        
         const match = line.match(/diff --git a\/(.*?) b\/(.*)/);
         currentFile = {
           filename: match?.[2] || 'unknown',
@@ -94,7 +99,9 @@ export default function DiffViewer({ diff }: DiffViewerProps) {
       }
     }
 
-    if (currentChunk && currentFile) currentFile.chunks.push(currentChunk);
+    if (currentChunk && currentFile) {
+      currentFile.chunks.push(currentChunk);
+    }
     if (currentFile) {
       // For new files without explicit chunks, create a single chunk with all content
       if (currentFile.chunks.length === 0) {

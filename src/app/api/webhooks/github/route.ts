@@ -193,6 +193,7 @@ async function handlePullRequest(payload: GitHubPullRequestPayload) {
   });
 
   // Fetch the actual PR diff from GitHub API
+  let prDiffText = null;
   try {
     const prDiffResponse = await fetch(`https://api.github.com/repos/${repository.full_name}/pulls/${pull_request.number}`, {
       headers: {
@@ -202,7 +203,7 @@ async function handlePullRequest(payload: GitHubPullRequestPayload) {
     });
     
     if (prDiffResponse.ok) {
-      const prDiffText = await prDiffResponse.text();
+      prDiffText = await prDiffResponse.text();
       console.log(`🔍 PR DIFF for #${pull_request.number}:`);
       console.log('=====================================');
       console.log(prDiffText);
@@ -210,6 +211,22 @@ async function handlePullRequest(payload: GitHubPullRequestPayload) {
     }
   } catch (error) {
     console.log(`❌ Failed to fetch PR diff for #${pull_request.number}:`, error);
+    
+    // Create fallback diff for PRs
+    prDiffText = `Pull Request: ${pull_request.title}
+Author: ${pull_request.user.login}
+PR #${pull_request.number}
+State: ${pull_request.state}${pull_request.draft ? ' (draft)' : ''}
+Base: ${pull_request.base.ref} ← Head: ${pull_request.head.ref}
+
+Changes:
++${pull_request.additions} additions
+-${pull_request.deletions} deletions
+${pull_request.changed_files} files changed
+
+GitHub URL: ${pull_request.html_url}
+
+Note: Full diff not available (private repo requires authentication)`;
   }
 
   // Find the project
@@ -250,6 +267,7 @@ async function handlePullRequest(payload: GitHubPullRequestPayload) {
     author: pull_request.user.login,
     authorEmail: pull_request.user.email,
     url: pull_request.html_url,
+    diff: prDiffText, // Store the PR diff
     baseBranch: pull_request.base.ref,
     additions: pull_request.additions,
     deletions: pull_request.deletions,
@@ -277,6 +295,65 @@ async function handlePullRequest(payload: GitHubPullRequestPayload) {
     pr = await prisma.pullRequest.create({
       data: prData,
     });
+
+    // Auto-generate AI analysis for new PRs
+    if (prDiffText && prDiffText.length > 200 && action === 'opened') { // Only analyze when PR is opened
+      try {
+        console.log(`🤖 Auto-analyzing PR: ${pull_request.title}`);
+        
+        // Set status to "analyzing"
+        await prisma.pullRequest.update({
+          where: { id: pr.id },
+          data: { aiAnalysisStatus: 'analyzing' }
+        });
+        
+        // Import AI analysis function
+        const { analyzePR } = await import('@/lib/ai-analysis');
+        
+        // Get project context
+        const projectContext = `${project.name}: ${project.description || 'No description'}`;
+        
+        // Get commit messages (empty array for now, could be enhanced)
+        const commitMessages = [`Initial PR: ${pull_request.title}`];
+        
+        // Generate AI analysis
+        const analysis = await analyzePR(
+          pull_request.title, 
+          pull_request.body, 
+          prDiffText, 
+          commitMessages, 
+          projectContext
+        );
+        
+        // Update PR with AI analysis and completed status
+        await prisma.pullRequest.update({
+          where: { id: pr.id },
+          data: { 
+            aiAnalysis: JSON.stringify(analysis),
+            aiAnalysisStatus: 'completed'
+          }
+        });
+        
+        console.log(`✅ AI analysis completed for PR: ${pull_request.number}`);
+        
+        // Log AI analysis audit event
+        await logAuditEvent({
+          userId: 'system',
+          projectId: project.id,
+          header: 'PR AI Analysis Generated',
+          description: `Auto-generated AI analysis for PR: ${analysis.summary}`,
+        });
+        
+      } catch (error) {
+        console.error(`❌ AI analysis failed for PR ${pull_request.number}:`, error);
+        
+        // Set status to "failed"
+        await prisma.pullRequest.update({
+          where: { id: pr.id },
+          data: { aiAnalysisStatus: 'failed' }
+        });
+      }
+    }
   }
 
   // Log audit event
@@ -462,9 +539,100 @@ Note: Full diff not available (private repo requires authentication)`;
     });
 
     if (!existingCommit) {
-      await prisma.commit.create({
+      const newCommit = await prisma.commit.create({
         data: commitData,
       });
+
+      // Notify connected clients about new commit
+      try {
+        await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/github-notify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'commit',
+            projectId: project.id,
+            data: { 
+              id: newCommit.id,
+              message: commit.message,
+              author: commit.author.name,
+              additions,
+              deletions,
+              changedFiles
+            }
+          })
+        });
+      } catch (error) {
+        console.log('Failed to notify clients:', error);
+      }
+
+      // Auto-generate AI analysis for new commits
+      if (commitDiff && commitDiff.length > 100) { // Only analyze substantial commits
+        try {
+          console.log(`🤖 Auto-analyzing commit: ${commit.message.split('\n')[0]}`);
+          
+          // Set status to "analyzing"
+          await prisma.commit.update({
+            where: { id: newCommit.id },
+            data: { aiAnalysisStatus: 'analyzing' }
+          });
+          
+          // Import AI analysis function
+          const { analyzeCommit } = await import('@/lib/ai-analysis');
+          
+          // Get project context
+          const projectContext = `${project.name}: ${project.description || 'No description'}`;
+          
+          // Generate AI analysis
+          const analysis = await analyzeCommit(commit.message, commitDiff, projectContext);
+          
+          // Update commit with AI analysis and completed status
+          await prisma.commit.update({
+            where: { id: newCommit.id },
+            data: { 
+              aiAnalysis: JSON.stringify(analysis),
+              aiAnalysisStatus: 'completed'
+            }
+          });
+          
+          console.log(`✅ AI analysis completed for commit: ${commit.id}`);
+          
+          // Notify clients about completed AI analysis
+          try {
+            await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/github-notify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'analysis_complete',
+                projectId: project.id,
+                data: { 
+                  id: newCommit.id,
+                  type: 'commit',
+                  summary: analysis.summary
+                }
+              })
+            });
+          } catch (error) {
+            console.log('Failed to notify clients about analysis:', error);
+          }
+          
+          // Log AI analysis audit event
+          await logAuditEvent({
+            userId: 'system',
+            projectId: project.id,
+            header: 'AI Analysis Generated',
+            description: `Auto-generated AI analysis for commit: ${analysis.summary}`,
+          });
+          
+        } catch (error) {
+          console.error(`❌ AI analysis failed for commit ${commit.id}:`, error);
+          
+          // Set status to "failed"
+          await prisma.commit.update({
+            where: { id: newCommit.id },
+            data: { aiAnalysisStatus: 'failed' }
+          });
+        }
+      }
 
       // Log audit event for significant commits (not tiny changes)
       if (additions + deletions > 5) {

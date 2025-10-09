@@ -7,9 +7,14 @@ import {
   CodeBracketIcon,
   DocumentTextIcon,
   CalendarIcon,
-  UserIcon 
+  UserIcon,
+  SparklesIcon,
+  InformationCircleIcon
 } from '@heroicons/react/24/outline';
 import { trpc } from '@/lib/trpc-client';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useGitHubUpdates } from '@/hooks/useGitHubUpdates';
+import AIAnalysisSection from './AIAnalysisSection';
 
 interface GitHubActivityViewProps {
   projectId: string;
@@ -20,11 +25,52 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
   const [viewMode, setViewMode] = useState<'branches' | 'prs'>('branches');
   const [expandedBranches, setExpandedBranches] = useState<Set<string>>(new Set());
   const [expandedPRs, setExpandedPRs] = useState<Set<string>>(new Set());
+  const [expandedAnalysis, setExpandedAnalysis] = useState<Set<string>>(new Set());
 
-  // Fetch GitHub data
-  const branches = trpc.github.getProjectBranches.useQuery({ projectId });
-  const prs = trpc.github.getProjectPRs.useQuery({ projectId });
-  const commits = trpc.github.getProjectCommits.useQuery({ projectId });
+  // Get current user
+  const { user: currentUser } = useCurrentUser();
+  const currentUserId = currentUser?.id || '';
+
+  // Enable real-time GitHub updates
+  useGitHubUpdates(projectId);
+
+  // Fetch GitHub data (real-time updates via SSE + fallback polling)
+  const branches = trpc.github.getProjectBranches.useQuery(
+    { projectId },
+    { 
+      refetchInterval: 30000, // Fallback refresh every 30 seconds
+      refetchOnWindowFocus: true, // Refresh when window gains focus
+    }
+  );
+  const prs = trpc.github.getProjectPRs.useQuery(
+    { projectId },
+    { 
+      refetchInterval: 30000,
+      refetchOnWindowFocus: true,
+    }
+  );
+  const commits = trpc.github.getProjectCommits.useQuery(
+    { projectId },
+    { 
+      refetchInterval: 30000,
+      refetchOnWindowFocus: true,
+    }
+  );
+
+  // AI Analysis mutations
+  const analyzeCommitMutation = trpc.github.analyzeCommit.useMutation({
+    onSuccess: () => {
+      // Refresh commits data
+      commits.refetch();
+    },
+  });
+
+  const analyzePRMutation = trpc.github.analyzePR.useMutation({
+    onSuccess: () => {
+      // Refresh PRs data
+      prs.refetch();
+    },
+  });
 
   const toggleBranchExpansion = (branchId: string) => {
     const newExpanded = new Set(expandedBranches);
@@ -58,6 +104,43 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
   const getTicketName = (ticketId: string) => {
     const ticket = tickets.find(t => t.id === ticketId);
     return ticket ? ticket.name : 'Unknown Ticket';
+  };
+
+  const toggleAnalysisExpansion = (id: string) => {
+    const newExpanded = new Set(expandedAnalysis);
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedAnalysis(newExpanded);
+  };
+
+  const parseAIAnalysis = (aiAnalysis: string | null) => {
+    if (!aiAnalysis) return null;
+    try {
+      return JSON.parse(aiAnalysis);
+    } catch {
+      return null;
+    }
+  };
+
+  const getComplexityColor = (complexity: string) => {
+    switch (complexity) {
+      case 'low': return 'text-green-600 bg-green-50';
+      case 'medium': return 'text-yellow-600 bg-yellow-50';
+      case 'high': return 'text-red-600 bg-red-50';
+      default: return 'text-gray-600 bg-gray-50';
+    }
+  };
+
+  const getRiskColor = (risk: string) => {
+    switch (risk) {
+      case 'low': return 'text-green-600 bg-green-50';
+      case 'medium': return 'text-yellow-600 bg-yellow-50';
+      case 'high': return 'text-red-600 bg-red-50';
+      default: return 'text-gray-600 bg-gray-50';
+    }
   };
 
   return (
@@ -154,9 +237,10 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
                                   </div>
                                 </div>
                                 <div className="flex items-center space-x-2 text-sm">
-                                  <span className="text-green-600">+{commit.additions}</span>
-                                  <span className="text-red-600">-{commit.deletions}</span>
-                                  {commit.diff && (
+                                  <span className="text-green-600">+{commit.additions || 0}</span>
+                                  <span className="text-red-600">-{commit.deletions || 0}</span>
+                                  <span className="text-gray-500">{commit.changedFiles || 0} files</span>
+                                  {commit.diff ? (
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
@@ -166,13 +250,28 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
                                         });
                                         window.dispatchEvent(event);
                                       }}
-                                      className="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-xs font-medium"
+                                      className="px-2 py-1 bg-blue-600 text-white hover:bg-blue-700 rounded text-xs font-medium"
                                     >
                                       View Diff
                                     </button>
+                                  ) : (
+                                    <span className="px-2 py-1 bg-gray-50 text-gray-400 rounded text-xs font-medium">
+                                      No diff
+                                    </span>
                                   )}
                                 </div>
                               </div>
+                              
+                              {/* AI Analysis Section */}
+                              <AIAnalysisSection
+                                item={commit}
+                                onAnalyze={(commitId) => analyzeCommitMutation.mutate({ 
+                                  commitId, 
+                                  userId: currentUserId
+                                })}
+                                isAnalyzing={analyzeCommitMutation.isLoading}
+                                type="commit"
+                              />
                             </div>
                           ))}
                         </div>
@@ -263,9 +362,10 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
                                   </div>
                                 </div>
                                 <div className="flex items-center space-x-2 text-sm">
-                                  <span className="text-green-600">+{commit.additions}</span>
-                                  <span className="text-red-600">-{commit.deletions}</span>
-                                  {commit.diff && (
+                                  <span className="text-green-600">+{commit.additions || 0}</span>
+                                  <span className="text-red-600">-{commit.deletions || 0}</span>
+                                  <span className="text-gray-500">{commit.changedFiles || 0} files</span>
+                                  {commit.diff ? (
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
@@ -275,13 +375,28 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
                                         });
                                         window.dispatchEvent(event);
                                       }}
-                                      className="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-xs font-medium"
+                                      className="px-2 py-1 bg-blue-600 text-white hover:bg-blue-700 rounded text-xs font-medium"
                                     >
                                       View Diff
                                     </button>
+                                  ) : (
+                                    <span className="px-2 py-1 bg-gray-50 text-gray-400 rounded text-xs font-medium">
+                                      No diff
+                                    </span>
                                   )}
                                 </div>
                               </div>
+                              
+                              {/* AI Analysis Section */}
+                              <AIAnalysisSection
+                                item={commit}
+                                onAnalyze={(commitId) => analyzeCommitMutation.mutate({ 
+                                  commitId, 
+                                  userId: currentUserId
+                                })}
+                                isAnalyzing={analyzeCommitMutation.isLoading}
+                                type="commit"
+                              />
                             </div>
                           ))}
                         </div>
@@ -290,8 +405,8 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
                       )}
 
                       {/* PR Diff Button */}
-                      {pr.diff && (
-                        <div className="p-4 border-t border-gray-200 bg-white">
+                      <div className="p-4 border-t border-gray-200 bg-white">
+                        {pr.diff ? (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -305,8 +420,23 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
                           >
                             View Full PR Diff
                           </button>
-                        </div>
-                      )}
+                        ) : (
+                          <div className="w-full px-4 py-2 bg-gray-50 text-gray-400 rounded text-center font-medium">
+                            No diff available
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* PR AI Analysis Section */}
+                      <AIAnalysisSection
+                        item={pr}
+                        onAnalyze={(prId) => analyzePRMutation.mutate({ 
+                          prId, 
+                          userId: currentUserId
+                        })}
+                        isAnalyzing={analyzePRMutation.isLoading}
+                        type="pr"
+                      />
                     </div>
                   )}
                 </div>
