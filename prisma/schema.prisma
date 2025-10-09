@@ -214,6 +214,7 @@ model PullRequest {
   
   // AI Analysis (JSON format for flexibility)
   aiAnalysis  String?  // JSON: { summary, impact, complexity, businessValue, etc. }
+  aiAnalysisStatus String? // "analyzing", "completed", "failed", null
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -246,6 +247,7 @@ model Commit {
   
   // AI Analysis (JSON format for flexibility)
   aiAnalysis  String?  // JSON: { summary, impact, complexity, etc. }
+  aiAnalysisStatus String? // "analyzing", "completed", "failed", null
   
   createdAt   DateTime @default(now())
   
