@@ -893,6 +893,7 @@ export default function ProjectsPage() {
         onEdit={handleEditTicket}
         currentUserId={currentUserId || undefined}
         projectUsers={projectUsers}
+        projectId={selectedProject || undefined}
       />
     </div>
   );

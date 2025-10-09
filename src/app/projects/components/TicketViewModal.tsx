@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { XMarkIcon, ClockIcon, UserIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
 import { trpc } from '@/lib/trpc-client';
+import GitHubLinkingSection from './GitHubLinkingSection';
 
 interface User {
   id: string;
@@ -17,6 +18,7 @@ interface Ticket {
   priority: string | null;
   ticketStatus: string | null;
   dueDate: Date | null;
+  githubUrl: string | null;
   createdAt: Date;
   assignees: {
     user: User;
@@ -31,6 +33,7 @@ interface TicketViewModalProps {
   onEdit: (ticket: Ticket) => void;
   currentUserId?: string;
   projectUsers?: User[];
+  projectId?: string;
 }
 
 // AssigneeSelector Component
@@ -152,7 +155,8 @@ export function TicketViewModal({
   ticket,
   onEdit,
   currentUserId,
-  projectUsers = []
+  projectUsers = [],
+  projectId
 }: TicketViewModalProps) {
   // Comment form state
   const [newComment, setNewComment] = useState('');
@@ -625,30 +629,12 @@ export function TicketViewModal({
                 />
               </div>
 
-              {/* GitHub URL */}
-              <div>
-                <h3 className="text-sm font-medium text-gray-700 mb-3">GitHub URL</h3>
-                <input
-                  type="url"
-                  value={displayTicket.githubUrl || ''}
-                  onChange={(e) => handleFieldUpdate('githubUrl', e.target.value)}
-                  placeholder="https://github.com/owner/repo/pull/123"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
-                />
-                {displayTicket.githubUrl && (
-                  <a
-                    href={displayTicket.githubUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center mt-2 text-sm text-blue-600 hover:text-blue-800"
-                  >
-                    View on GitHub
-                    <svg className="w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                  </a>
-                )}
-              </div>
+              {/* GitHub Integration */}
+              <GitHubLinkingSection 
+                ticket={{...displayTicket, projectId: projectId || ''}}
+                onGitHubUrlUpdate={(url) => handleFieldUpdate('githubUrl', url)}
+                currentUserId={currentUserId}
+              />
 
               {/* Created */}
               <div>

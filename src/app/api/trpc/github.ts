@@ -45,7 +45,7 @@ export const githubRouter = router({
   getProjectCommits: publicProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ input }) => {
-      return await prisma.commit.findMany({
+      const commits = await prisma.commit.findMany({
         where: { projectId: input.projectId },
         include: {
           ticket: true,
@@ -55,6 +55,21 @@ export const githubRouter = router({
         orderBy: { createdAt: 'desc' },
         take: 50, // Limit to recent commits
       });
+
+      // Debug logging for the first few commits
+      if (commits.length > 0) {
+        console.log('🔍 Latest commits debug:', commits.slice(0, 3).map(c => ({
+          id: c.id,
+          message: c.message,
+          aiAnalysisStatus: c.aiAnalysisStatus,
+          hasAnalysis: !!c.aiAnalysis,
+          hasDiff: !!c.diff,
+          diffLength: c.diff?.length || 0,
+          createdAt: c.createdAt
+        })));
+      }
+
+      return commits;
     }),
 
   // Get PRs for a specific ticket
@@ -440,5 +455,64 @@ export const githubRouter = router({
       });
 
       return { pr: updatedPR, analysis };
+    }),
+
+  // Link branch to ticket
+  linkBranchToTicket: publicProcedure
+    .input(z.object({
+      branchId: z.string(),
+      ticketId: z.string(),
+      userId: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      // Update the branch to link to the ticket
+      const updatedBranch = await prisma.gitHubBranch.update({
+        where: { id: input.branchId },
+        data: { ticketId: input.ticketId },
+        include: { ticket: true },
+      });
+
+      // Log the linking
+      await logAuditEvent({
+        userId: input.userId,
+        projectId: updatedBranch.projectId,
+        header: 'Branch Linked to Ticket',
+        description: `Linked branch "${updatedBranch.name}" to ticket "${updatedBranch.ticket?.name || 'Unknown'}"`,
+      });
+
+      return updatedBranch;
+    }),
+
+  // Unlink branch from ticket
+  unlinkBranchFromTicket: publicProcedure
+    .input(z.object({
+      branchId: z.string(),
+      userId: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      const branch = await prisma.gitHubBranch.findUnique({
+        where: { id: input.branchId },
+        include: { ticket: true },
+      });
+
+      if (!branch) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch not found' });
+      }
+
+      // Update the branch to unlink from ticket
+      const updatedBranch = await prisma.gitHubBranch.update({
+        where: { id: input.branchId },
+        data: { ticketId: null },
+      });
+
+      // Log the unlinking
+      await logAuditEvent({
+        userId: input.userId,
+        projectId: branch.projectId,
+        header: 'Branch Unlinked from Ticket',
+        description: `Unlinked branch "${branch.name}" from ticket "${branch.ticket?.name || 'Unknown'}"`,
+      });
+
+      return updatedBranch;
     }),
 });

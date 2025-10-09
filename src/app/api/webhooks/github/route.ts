@@ -566,7 +566,8 @@ Note: Full diff not available (private repo requires authentication)`;
       }
 
       // Auto-generate AI analysis for new commits
-      if (commitDiff && commitDiff.length > 100) { // Only analyze substantial commits
+      console.log(`🔍 Checking commit for auto-analysis: diff length = ${commitDiff?.length || 0}`);
+      if (commitDiff && commitDiff.length > 50) { // Lowered threshold for testing
         try {
           console.log(`🤖 Auto-analyzing commit: ${commit.message.split('\n')[0]}`);
           
