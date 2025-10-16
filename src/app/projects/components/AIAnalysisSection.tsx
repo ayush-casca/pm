@@ -12,7 +12,7 @@ interface AIAnalysisSectionProps {
   };
   onAnalyze: (id: string) => void;
   isAnalyzing: boolean;
-  type: 'commit' | 'pr';
+  type: 'commit ' | 'pr';
 }
 
 interface Analysis {
