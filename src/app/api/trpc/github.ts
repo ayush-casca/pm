@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { router, publicProcedure } from '@/lib/trpc-setup';
+import { TRPCError } from '@trpc/server';
 import { prisma } from '@/lib/prisma';
 import { logAuditEvent } from '@/lib/audit';
 
@@ -11,11 +12,31 @@ export const githubRouter = router({
       //making some fake changes
       return await prisma.gitHubBranch.findMany({
         where: { projectId: input.projectId },
-        include: {
-          ticket: true,
-          user: true,
+        select: {
+          id: true,
+          name: true,
+          url: true,
+          author: true,
+          description: true,
+          ticketId: true, // Include ticketId for linking logic
+          createdAt: true,
+          updatedAt: true,
+          ticket: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
           pullRequests: {
             orderBy: { updatedAt: 'desc' },
+            take: 5,
           },
           commits: {
             orderBy: { createdAt: 'desc' },
@@ -47,10 +68,35 @@ export const githubRouter = router({
     .query(async ({ input }) => {
       const commits = await prisma.commit.findMany({
         where: { projectId: input.projectId },
-        include: {
-          ticket: true,
-          user: true,
-          branch: true,
+        select: {
+          id: true,
+          message: true,
+          githubId: true,
+          url: true,
+          author: true,
+          createdAt: true,
+          additions: true,
+          deletions: true,
+          ticketId: true, // Include ticketId for linking logic
+          ticket: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          branch: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
         take: 50, // Limit to recent commits
@@ -235,13 +281,28 @@ export const githubRouter = router({
       userId: z.string(),
     }))
     .mutation(async ({ input }) => {
+      console.log('eeee 🌐 linkCommitToTicket tRPC mutation called:', {
+        commitId: input.commitId,
+        ticketId: input.ticketId,
+        userId: input.userId,
+        action: input.ticketId ? 'LINK' : 'UNLINK'
+      });
+
       const commit = await prisma.commit.update({
         where: { id: input.commitId },
-        data: { ticketId: input.ticketId },
+        data: { ticketId: input.ticketId || null }, // Explicitly convert undefined to null
         include: {
           ticket: true,
           project: true,
         },
+      });
+
+      console.log('eeee 🌐 linkCommitToTicket database update successful:', {
+        commitId: commit.id,
+        commitMessage: commit.message.substring(0, 50),
+        oldTicketId: 'unknown', // We don't have the old value
+        newTicketId: commit.ticketId,
+        ticketName: commit.ticket?.name || null
       });
 
       // Log linking/unlinking
@@ -257,6 +318,7 @@ export const githubRouter = router({
         description,
       });
 
+      console.log('eeee 🌐 linkCommitToTicket audit log created, returning commit');
       return commit;
     }),
 
@@ -514,5 +576,94 @@ export const githubRouter = router({
       });
 
       return updatedBranch;
+    }),
+
+  // Link commit to suggested ticket (from AI analysis)
+  linkCommitToSuggestedTicket: publicProcedure
+    .input(z.object({
+      commitId: z.string(),
+      ticketId: z.string(),
+      userId: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      console.log('🔗 Linking commit to AI-suggested ticket:', {
+        commitId: input.commitId,
+        ticketId: input.ticketId,
+        userId: input.userId
+      });
+
+      // Link the commit to the ticket
+      const commit = await prisma.commit.update({
+        where: { id: input.commitId },
+        data: { ticketId: input.ticketId },
+        include: {
+          ticket: true,
+          project: true,
+        },
+      });
+
+      // Clear the potentialCommit flag since it's now linked
+      await prisma.ticket.update({
+        where: { id: input.ticketId },
+        data: { potentialCommit: false },
+      });
+
+      // Log the linking action
+      await logAuditEvent({
+        userId: input.userId,
+        projectId: commit.projectId,
+        header: 'AI Suggestion Accepted',
+        description: `Linked commit "${commit.message.substring(0, 50)}..." to ticket "${commit.ticket?.name}" (AI suggestion)`,
+      });
+
+      console.log('✅ AI suggestion accepted and commit linked');
+      return commit;
+    }),
+
+  // Dismiss AI commit suggestion
+  dismissCommitSuggestion: publicProcedure
+    .input(z.object({
+      ticketId: z.string(),
+      commitId: z.string(), // For logging purposes
+      userId: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      console.log('❌ Dismissing AI commit suggestion:', {
+        ticketId: input.ticketId,
+        commitId: input.commitId,
+        userId: input.userId
+      });
+
+      // Get ticket and commit info for logging
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: input.ticketId },
+        select: { name: true, projectId: true },
+      });
+
+      const commit = await prisma.commit.findUnique({
+        where: { id: input.commitId },
+        select: { message: true },
+      });
+
+      if (!ticket || !commit) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Ticket or commit not found' });
+      }
+
+      // Clear the potentialCommit flag
+      const updatedTicket = await prisma.ticket.update({
+        where: { id: input.ticketId },
+        data: { potentialCommit: false },
+      });
+
+      // Log the dismissal
+      await logAuditEvent({
+        userId: input.userId,
+        projectId: ticket.projectId,
+        header: 'AI Suggestion Dismissed',
+        description: `Dismissed AI suggestion to link commit "${commit.message.substring(0, 50)}..." to ticket "${ticket.name}"`,
+      });
+
+      console.log('✅ AI suggestion dismissed');
+      return updatedTicket;
     }),
 });

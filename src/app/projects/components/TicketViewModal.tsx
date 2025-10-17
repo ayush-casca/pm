@@ -4,6 +4,8 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { XMarkIcon, ClockIcon, UserIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
 import { trpc } from '@/lib/trpc-client';
 import GitHubLinkingSection from './GitHubLinkingSection';
+import BranchLinkingSection from './BranchLinkingSection';
+import CommitLinkingSection from './CommitLinkingSection';
 
 interface User {
   id: string;
@@ -19,11 +21,17 @@ interface Ticket {
   ticketStatus: string | null;
   dueDate: Date | null;
   githubUrl: string | null;
+  githubBranchUrl: string | null;
+  githubCommitUrl: string | null;
   createdAt: Date;
   assignees: {
     user: User;
   }[];
   creator?: User | null;
+  // Potential match flags
+  potentialCommit?: boolean;
+  potentialBranch?: boolean;
+  potentialPR?: boolean;
 }
 
 interface TicketViewModalProps {
@@ -629,12 +637,68 @@ export function TicketViewModal({
                 />
               </div>
 
+              {/* Potential Matches Indicator */}
+              {(displayTicket.potentialCommit || displayTicket.potentialBranch || displayTicket.potentialPR) && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-orange-800 mb-2">🎯 AI Suggested Matches</h3>
+                  <div className="space-y-2">
+                    {displayTicket.potentialCommit && (
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                        <span className="text-sm text-orange-700">
+                          <strong>Commit:</strong> AI found a commit that might relate to this ticket
+                        </span>
+                      </div>
+                    )}
+                    {displayTicket.potentialBranch && (
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                        <span className="text-sm text-orange-700">
+                          <strong>Branch:</strong> AI found a branch that might relate to this ticket
+                        </span>
+                      </div>
+                    )}
+                    {displayTicket.potentialPR && (
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                        <span className="text-sm text-orange-700">
+                          <strong>Pull Request:</strong> AI found a PR that might relate to this ticket
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-orange-600 mt-2">
+                    💡 Check the GitHub tab to review and confirm these suggestions
+                  </p>
+                </div>
+              )}
+
               {/* GitHub Integration */}
               <GitHubLinkingSection 
                 ticket={{...displayTicket, projectId: projectId || ''}}
                 onGitHubUrlUpdate={(url) => handleFieldUpdate('githubUrl', url)}
                 currentUserId={currentUserId}
               />
+
+              {/* Branch Linking */}
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 mb-3">🌿 Branch Linking</h3>
+                <BranchLinkingSection 
+                  ticket={{...displayTicket, projectId: projectId || ''}}
+                  onBranchUrlUpdate={(url) => handleFieldUpdate('githubBranchUrl', url)}
+                  currentUserId={currentUserId}
+                />
+              </div>
+
+              {/* Commit Linking */}
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 mb-3">📝 Commit Linking</h3>
+                <CommitLinkingSection 
+                  ticket={{...displayTicket, projectId: projectId || ''}}
+                  onCommitUrlUpdate={(url) => handleFieldUpdate('githubCommitUrl', url)}
+                  currentUserId={currentUserId}
+                />
+              </div>
 
               {/* Created */}
               <div>

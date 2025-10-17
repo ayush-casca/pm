@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { SparklesIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
+import { trpc } from '@/lib/trpc-client';
 
 interface AIAnalysisSectionProps {
   item: {
@@ -13,6 +14,8 @@ interface AIAnalysisSectionProps {
   onAnalyze: (id: string) => void;
   isAnalyzing: boolean;
   type: 'commit' | 'pr';
+  currentUserId?: string;
+  projectId?: string;
 }
 
 interface Analysis {
@@ -27,15 +30,99 @@ interface Analysis {
   testingNeeded?: boolean;
   deploymentRisk?: 'low' | 'medium' | 'high';
   estimatedReviewTime?: string;
+  // NEW: Ticket matching
+  potentialMatches?: Array<{
+    ticketId: string;
+    ticketTitle: string;
+    confidence: number;
+    reasoning: string;
+  }>;
+  suggestedNewTicket?: {
+    title: string;
+    description: string;
+    confidence: number;
+    reasoning: string;
+  };
 }
 
 export default function AIAnalysisSection({ 
   item, 
   onAnalyze, 
   isAnalyzing, 
-  type 
+  type,
+  currentUserId,
+  projectId
 }: AIAnalysisSectionProps) {
   const [expanded, setExpanded] = useState(false);
+  const utils = trpc.useUtils();
+
+  // Mutations for AI suggestions
+  const linkCommitToSuggestedTicket = trpc.github.linkCommitToSuggestedTicket.useMutation({
+    onSuccess: () => {
+      // Invalidate queries to refresh the UI
+      if (projectId) {
+        utils.github.getProjectCommits.invalidate({ projectId });
+        utils.ticket.getProjectTickets.invalidate({ projectId });
+      }
+    },
+    onError: (error) => {
+      console.error('Failed to link commit to suggested ticket:', error);
+    },
+  });
+
+  const dismissCommitSuggestion = trpc.github.dismissCommitSuggestion.useMutation({
+    onSuccess: () => {
+      // Invalidate queries to refresh the UI
+      if (projectId) {
+        utils.github.getProjectCommits.invalidate({ projectId });
+        utils.ticket.getProjectTickets.invalidate({ projectId });
+      }
+    },
+    onError: (error) => {
+      console.error('Failed to dismiss commit suggestion:', error);
+    },
+  });
+
+  // Handler functions for AI suggestions
+  const handleLinkSuggestion = (ticketId: string, ticketTitle: string) => {
+    if (!currentUserId) {
+      console.error('No current user ID available');
+      return;
+    }
+
+    console.log('🔗 Linking commit to suggested ticket:', {
+      commitId: item.id,
+      ticketId,
+      ticketTitle,
+      userId: currentUserId
+    });
+
+    linkCommitToSuggestedTicket.mutate({
+      commitId: item.id,
+      ticketId,
+      userId: currentUserId,
+    });
+  };
+
+  const handleDismissSuggestion = (ticketId: string, ticketTitle: string) => {
+    if (!currentUserId) {
+      console.error('No current user ID available');
+      return;
+    }
+
+    console.log('❌ Dismissing AI suggestion:', {
+      commitId: item.id,
+      ticketId,
+      ticketTitle,
+      userId: currentUserId
+    });
+
+    dismissCommitSuggestion.mutate({
+      ticketId,
+      commitId: item.id,
+      userId: currentUserId,
+    });
+  };
 
   const parseAIAnalysis = (aiAnalysis: string | null): Analysis | null => {
     if (!aiAnalysis) return null;
@@ -218,6 +305,53 @@ export default function AIAnalysisSection({
                   </ul>
                 </div>
               )}
+
+              {/* NEW: Potential Matches Section */}
+              {analysis.potentialMatches && analysis.potentialMatches.length > 0 && (
+                <div className="bg-white p-3 rounded border border-orange-200">
+                  <h4 className="text-sm font-semibold text-orange-800 mb-2">🎯 Potential Ticket Matches:</h4>
+                  <div className="space-y-2">
+                    {analysis.potentialMatches.map((match, idx) => (
+                      <div key={idx} className="bg-orange-50 border border-orange-200 rounded p-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-sm font-medium text-orange-900">
+                              {match.ticketTitle}
+                            </span>
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              match.confidence >= 0.8 
+                                ? 'bg-green-100 text-green-800' 
+                                : match.confidence >= 0.6
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-gray-100 text-gray-800'
+                            }`}>
+                              {Math.round(match.confidence * 100)}% match
+                            </span>
+                          </div>
+                          <div className="flex space-x-1">
+                            <button 
+                              onClick={() => handleLinkSuggestion(match.ticketId, match.ticketTitle)}
+                              disabled={linkCommitToSuggestedTicket.isPending || !currentUserId}
+                              className="px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {linkCommitToSuggestedTicket.isPending ? '🔄' : '✅'} Link
+                            </button>
+                            <button 
+                              onClick={() => handleDismissSuggestion(match.ticketId, match.ticketTitle)}
+                              disabled={dismissCommitSuggestion.isPending || !currentUserId}
+                              className="px-2 py-1 bg-gray-600 text-white rounded text-xs hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {dismissCommitSuggestion.isPending ? '🔄' : '❌'} Dismiss
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-xs text-orange-700">{match.reasoning}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
             </div>
           )}
         </div>

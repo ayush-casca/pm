@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 export interface AuditLogData {
-  userId: string;
+  userId?: string | null; // Made optional for system events
   projectId: string;
   header: string;
   description: string;
@@ -24,16 +24,33 @@ export async function logAuditEvent(data: AuditLogData): Promise<void> {
   try {
     await prisma.auditLog.create({
       data: {
-        userId: data.userId,
+        userId: data.userId === 'system' ? null : data.userId,
         projectId: data.projectId,
         header: data.header,
         description: data.description,
       },
     });
+    
+    // Log system events to console for debugging
+    if (data.userId === 'system' || !data.userId) {
+      console.log(`📝 System event logged: ${data.header} - ${data.description}`);
+    }
   } catch (error) {
     console.error('Failed to log audit event:', error);
     // Don't throw - audit logging shouldn't break the main flow
   }
+}
+
+/**
+ * Helper function to log system events (no user)
+ */
+export async function logSystemEvent(projectId: string, header: string, description: string): Promise<void> {
+  return logAuditEvent({
+    userId: null,
+    projectId,
+    header,
+    description,
+  });
 }
 
 /**

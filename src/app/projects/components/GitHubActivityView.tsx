@@ -271,6 +271,8 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
                                 })}
                                 isAnalyzing={analyzeCommitMutation.isLoading}
                                 type="commit"
+                                currentUserId={currentUserId}
+                                projectId={projectId}
                               />
                             </div>
                           ))}
@@ -396,6 +398,8 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
                                 })}
                                 isAnalyzing={analyzeCommitMutation.isLoading}
                                 type="commit"
+                                currentUserId={currentUserId}
+                                projectId={projectId}
                               />
                             </div>
                           ))}
@@ -436,6 +440,8 @@ export default function GitHubActivityView({ projectId, tickets }: GitHubActivit
                         })}
                         isAnalyzing={analyzePRMutation.isLoading}
                         type="pr"
+                        currentUserId={currentUserId}
+                        projectId={projectId}
                       />
                     </div>
                   )}

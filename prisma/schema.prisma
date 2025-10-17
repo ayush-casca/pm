@@ -66,6 +66,8 @@ model Ticket {
   priority      String?  // "high", "medium", "low"
   dueDate       DateTime?
   githubUrl     String?  // Simple GitHub URL field
+  githubBranchUrl String?  // Manual branch URL
+  githubCommitUrl String?  // Manual commit URL
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   
@@ -78,6 +80,11 @@ model Ticket {
   transcript    Transcript? @relation(fields: [transcriptId], references: [id])
 
   isManualCreated Boolean @default(false)
+  
+  // Potential AI matches (boolean flags)
+  potentialCommit Boolean @default(false)
+  potentialBranch Boolean @default(false)
+  potentialPR     Boolean @default(false)
   
   assignees      Assignee[]
   comments       TicketComment[]
@@ -115,8 +122,8 @@ model AuditLog {
   // Relations
   projectId   String
   project     Project @relation(fields: [projectId], references: [id])
-  userId      String
-  user        User    @relation(fields: [userId], references: [id])
+  userId      String?  // Made optional for system events
+  user        User?    @relation(fields: [userId], references: [id])
 }
 
 // Ticket Update model

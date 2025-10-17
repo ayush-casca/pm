@@ -13,7 +13,21 @@ export const ticketRouter = router({
           projectId: input.projectId,
           creatorStatus: 'approved' // Only show approved tickets in tickets tab
         },
-        include: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          priority: true,
+          ticketStatus: true,
+          dueDate: true,
+          githubUrl: true,
+          githubBranchUrl: true,
+          githubCommitUrl: true,
+          createdAt: true,
+          // Include potential match flags
+          potentialCommit: true,
+          potentialBranch: true,
+          potentialPR: true,
           assignees: {
             include: {
               user: true,

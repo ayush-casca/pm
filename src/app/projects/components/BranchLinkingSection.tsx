@@ -6,7 +6,7 @@ import { trpc } from '@/lib/trpc-client';
 
 interface Ticket {
   id: string;
-  githubUrl: string | null;
+  githubBranchUrl: string | null;
   projectId?: string;
 }
 
@@ -16,25 +16,26 @@ interface Branch {
   url: string;
   author: string;
   description?: string | null;
+  ticketId?: string | null;
 }
 
-interface GitHubLinkingSectionProps {
+interface BranchLinkingSectionProps {
   ticket: Ticket;
-  onGitHubUrlUpdate: (url: string) => void;
+  onBranchUrlUpdate: (url: string) => void;
   currentUserId?: string;
 }
 
-export default function GitHubLinkingSection({ 
+export default function BranchLinkingSection({ 
   ticket, 
-  onGitHubUrlUpdate, 
+  onBranchUrlUpdate, 
   currentUserId 
-}: GitHubLinkingSectionProps) {
+}: BranchLinkingSectionProps) {
   const [showBranchSelector, setShowBranchSelector] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [linkingMode, setLinkingMode] = useState<'manual' | 'branch' | 'commit'>('manual');
+  const [linkingMode, setLinkingMode] = useState<'linked' | 'manual'>('linked');
 
-  // Get project ID from ticket (you might need to adjust this based on your ticket structure)
   const projectId = ticket.projectId || '';
+  const utils = trpc.useUtils();
 
   // Fetch branches for the project
   const { data: branches = [], isLoading } = trpc.github.getProjectBranches.useQuery(
@@ -42,52 +43,100 @@ export default function GitHubLinkingSection({
     { enabled: !!projectId }
   );
 
-  // Find the linked branch by matching the GitHub URL
-  const linkedBranch = branches.find(branch => branch.url === ticket.githubUrl);
+  // Find the linked branch by checking if it's linked to this ticket
+  const linkedBranch = branches.find(branch => branch.ticketId === ticket.id);
 
   // Mutation to link branch to ticket
   const linkBranchToTicket = trpc.github.linkBranchToTicket.useMutation({
     onSuccess: () => {
       setShowBranchSelector(false);
-      setSearchQuery('');
+      // Invalidate and refetch branch data
+      utils.github.getProjectBranches.invalidate({ projectId });
+    },
+  });
+
+  // Mutation to unlink branch from ticket
+  const unlinkBranchFromTicket = trpc.github.unlinkBranchFromTicket.useMutation({
+    onSuccess: () => {
+      // Invalidate and refetch branch data
+      utils.github.getProjectBranches.invalidate({ projectId });
     },
   });
 
   // Filter branches based on search
   const filteredBranches = branches.filter(branch =>
     branch.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (branch.description && branch.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
     branch.author.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleBranchSelect = (branch: Branch) => {
     if (!currentUserId) return;
-    
-    // Set the GitHub URL to the branch URL
-    onGitHubUrlUpdate(branch.url);
-    
-    // Optionally link the branch to the ticket in the database
-    linkBranchToTicket.mutate({
-      branchId: branch.id,
+
+    console.log('🌿 Branch selection:', { 
+      selectedBranch: branch.name, 
+      currentLinkedBranch: linkedBranch?.name,
       ticketId: ticket.id,
-      userId: currentUserId,
+      userId: currentUserId 
     });
-    
+
+    // If selecting the same branch, do nothing
+    if (linkedBranch && linkedBranch.id === branch.id) {
+      setShowBranchSelector(false);
+      setSearchQuery('');
+      return;
+    }
+
+    // If there's already a linked branch, unlink it first, then link the new one
+    if (linkedBranch) {
+      console.log('🔄 Unlinking current branch first:', linkedBranch.name);
+      unlinkBranchFromTicket.mutate({
+        branchId: linkedBranch.id,
+        userId: currentUserId,
+      }, {
+        onSuccess: () => {
+          // After unlinking, link the new branch
+          console.log('🔗 Now linking new branch:', branch.name);
+          linkBranchToTicket.mutate({
+            branchId: branch.id,
+            ticketId: ticket.id,
+            userId: currentUserId,
+          });
+        }
+      });
+    } else {
+      // No existing link, just link the new branch
+      console.log('🔗 Linking new branch:', branch.name);
+      linkBranchToTicket.mutate({
+        branchId: branch.id,
+        ticketId: ticket.id,
+        userId: currentUserId,
+      });
+    }
+
     setShowBranchSelector(false);
     setSearchQuery('');
   };
 
-  const clearGitHubUrl = () => {
-    onGitHubUrlUpdate('');
+  const clearBranchUrl = () => {
+    onBranchUrlUpdate('');
   };
 
   return (
     <div>
-      <h3 className="text-sm font-medium text-gray-700 mb-3">GitHub Integration</h3>
-      
-      {/* Toggle between manual URL and branch selector */}
+      {/* Mode Selector */}
       <div className="mb-4">
         <div className="flex space-x-1 bg-gray-100 rounded-lg p-1 border">
+          <button
+            type="button"
+            onClick={() => setLinkingMode('linked')}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              linkingMode === 'linked'
+                ? 'bg-white text-gray-900 shadow-sm border'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            🔗 Linked
+          </button>
           <button
             type="button"
             onClick={() => setLinkingMode('manual')}
@@ -97,18 +146,7 @@ export default function GitHubLinkingSection({
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            📝 Manual URL
-          </button>
-          <button
-            type="button"
-            onClick={() => setLinkingMode('branch')}
-            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-              linkingMode === 'branch'
-                ? 'bg-white text-gray-900 shadow-sm border'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            🌿 Select Branch
+            📝 Manual
           </button>
         </div>
       </div>
@@ -119,15 +157,15 @@ export default function GitHubLinkingSection({
           <div className="relative">
             <input
               type="url"
-              value={ticket.githubUrl || ''}
-              onChange={(e) => onGitHubUrlUpdate(e.target.value)}
-              placeholder="https://github.com/owner/repo/pull/123"
+              value={ticket.githubBranchUrl || ''}
+              onChange={(e) => onBranchUrlUpdate(e.target.value)}
+              placeholder="https://github.com/owner/repo/tree/branch-name"
               className="w-full px-3 py-2 pr-8 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white text-sm"
             />
-            {ticket.githubUrl && (
+            {ticket.githubBranchUrl && (
               <button
                 type="button"
-                onClick={clearGitHubUrl}
+                onClick={clearBranchUrl}
                 className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
               >
                 <XMarkIcon className="w-4 h-4" />
@@ -135,15 +173,15 @@ export default function GitHubLinkingSection({
             )}
           </div>
           
-          {ticket.githubUrl && (
+          {ticket.githubBranchUrl && (
             <a
-              href={ticket.githubUrl}
+              href={ticket.githubBranchUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center mt-2 text-sm text-blue-600 hover:text-blue-800"
             >
               <LinkIcon className="w-3 h-3 mr-1" />
-              View on GitHub
+              View Branch
             </a>
           )}
         </div>
@@ -228,7 +266,7 @@ export default function GitHubLinkingSection({
             )}
           </div>
 
-          {ticket.githubUrl && (
+          {(linkedBranch || ticket.githubBranchUrl) && (
             <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 min-w-0 flex-1">
@@ -239,14 +277,14 @@ export default function GitHubLinkingSection({
                         <div className="font-medium text-green-900 truncate">{linkedBranch.name}</div>
                         <div className="text-xs text-green-700">by {linkedBranch.author}</div>
                       </>
-                    ) : (
-                      <div className="font-medium text-green-900 truncate">Custom GitHub URL</div>
-                    )}
+                    ) : ticket.githubBranchUrl ? (
+                      <div className="font-medium text-green-900 truncate">Custom Branch URL</div>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex items-center space-x-2 flex-shrink-0">
                   <a
-                    href={ticket.githubUrl}
+                    href={linkedBranch ? linkedBranch.url : ticket.githubBranchUrl || '#'}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center text-sm text-green-600 hover:text-green-800 font-medium"
@@ -256,7 +294,22 @@ export default function GitHubLinkingSection({
                   </a>
                   <button
                     type="button"
-                    onClick={clearGitHubUrl}
+                    onClick={() => {
+                      if (linkedBranch && currentUserId) {
+                        console.log('🔄 Manual unlink branch:', { 
+                          branchName: linkedBranch.name, 
+                          branchId: linkedBranch.id,
+                          userId: currentUserId 
+                        });
+                        unlinkBranchFromTicket.mutate({
+                          branchId: linkedBranch.id,
+                          userId: currentUserId,
+                        });
+                      } else {
+                        console.log('🗑️ Clearing manual branch URL');
+                        clearBranchUrl();
+                      }
+                    }}
                     className="text-xs text-green-600 hover:text-green-800 underline"
                   >
                     Unlink

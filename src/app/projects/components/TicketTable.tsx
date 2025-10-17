@@ -36,6 +36,10 @@ interface Ticket {
   assignees: {
     user: User;
   }[];
+  // Potential match flags
+  potentialCommit?: boolean;
+  potentialBranch?: boolean;
+  potentialPR?: boolean;
 }
 
 interface TicketTableProps {
@@ -405,10 +409,37 @@ export function TicketTable({ tickets, onEditTicket, onViewTicket, onUpdateTicke
                   >
                     <td className="px-6 py-4">
                       <div>
-                        <div className="text-sm font-medium text-gray-900">{ticket.name}</div>
+                        <div className="flex items-center space-x-2">
+                          <div className="text-sm font-medium text-gray-900">{ticket.name}</div>
+                          {(ticket.potentialCommit || ticket.potentialBranch || ticket.potentialPR) && (
+                            <div className="flex items-center space-x-1">
+                              <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" title="AI found potential matches"></div>
+                              <span className="text-xs text-orange-600 font-medium">🎯 AI Match</span>
+                            </div>
+                          )}
+                        </div>
                         {ticket.description && (
                           <div className="text-sm text-gray-500 truncate max-w-xs">
                             {ticket.description}
+                          </div>
+                        )}
+                        {(ticket.potentialCommit || ticket.potentialBranch || ticket.potentialPR) && (
+                          <div className="flex items-center space-x-2 mt-1">
+                            {ticket.potentialCommit && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
+                                📝 Commit
+                              </span>
+                            )}
+                            {ticket.potentialBranch && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
+                                🌿 Branch
+                              </span>
+                            )}
+                            {ticket.potentialPR && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
+                                🔀 PR
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>

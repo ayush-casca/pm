@@ -308,20 +308,51 @@ Note: Full diff not available (private repo requires authentication)`;
         });
         
         // Import AI analysis function
-        const { analyzePR } = await import('@/lib/ai-analysis');
+        const { analyzePRWithTickets } = await import('@/lib/ai-analysis');
         
         // Get project context
         const projectContext = `${project.name}: ${project.description || 'No description'}`;
         
+        // Fetch unlinked tickets for matching
+        const unlinkedTicketsRaw = await prisma.ticket.findMany({
+          where: {
+            projectId: project.id,
+            ticketStatus: { in: ['todo', 'in_progress'] },
+            // Tickets without any linked commits, PRs, or branches
+            commits: { none: {} },
+            pullRequests: { none: {} },
+            githubBranches: { none: {} }
+          },
+          select: {
+            id: true,
+            name: true,
+            description: true
+          }
+        });
+
+        // Convert null descriptions to undefined for TypeScript compatibility
+        const unlinkedTickets = unlinkedTicketsRaw.map(ticket => ({
+          ...ticket,
+          description: ticket.description || undefined
+        }));
+        
+        // Log ticket matching context for debugging
+        console.log(`🎯 Ticket Matching Context for PR: ${pull_request.title}`);
+        console.log(`📋 Found ${unlinkedTickets.length} unlinked tickets to match against:`);
+        unlinkedTickets.forEach((ticket, idx) => {
+          console.log(`  ${idx + 1}. "${ticket.name}" ${ticket.description ? `(${ticket.description.substring(0, 50)}...)` : '(no description)'}`);
+        });
+        
         // Get commit messages (empty array for now, could be enhanced)
         const commitMessages = [`Initial PR: ${pull_request.title}`];
         
-        // Generate AI analysis
-        const analysis = await analyzePR(
+        // Generate AI analysis with ticket matching
+        const analysis = await analyzePRWithTickets(
           pull_request.title, 
           pull_request.body, 
           prDiffText, 
           commitMessages, 
+          unlinkedTickets,
           projectContext
         );
         
@@ -337,12 +368,12 @@ Note: Full diff not available (private repo requires authentication)`;
         console.log(`✅ AI analysis completed for PR: ${pull_request.number}`);
         
         // Log AI analysis audit event
-        await logAuditEvent({
-          userId: 'system',
-          projectId: project.id,
-          header: 'PR AI Analysis Generated',
-          description: `Auto-generated AI analysis for PR: ${analysis.summary}`,
-        });
+        const { logSystemEvent } = await import('@/lib/audit');
+        await logSystemEvent(
+          project.id,
+          'PR AI Analysis Generated',
+          `Auto-generated AI analysis for PR: ${analysis.summary}`
+        );
         
       } catch (error) {
         console.error(`❌ AI analysis failed for PR ${pull_request.number}:`, error);
@@ -364,12 +395,12 @@ Note: Full diff not available (private repo requires authentication)`;
                    : action === 'converted_to_draft' ? 'converted to draft'
                    : 'updated';
 
-  await logAuditEvent({
-    userId: 'system', // GitHub webhook user
-    projectId: project.id,
-    header: `Pull Request ${actionText.charAt(0).toUpperCase() + actionText.slice(1)}`,
-    description: `PR #${pull_request.number} "${pull_request.title}" ${actionText}${referencedTickets.length > 0 ? ` (linked to ${referencedTickets.map(t => t.name).join(', ')})` : ''}`,
-  });
+  const { logSystemEvent } = await import('@/lib/audit');
+  await logSystemEvent(
+    project.id,
+    `Pull Request ${actionText.charAt(0).toUpperCase() + actionText.slice(1)}`,
+    `PR #${pull_request.number} "${pull_request.title}" ${actionText}${referencedTickets.length > 0 ? ` (linked to ${referencedTickets.map(t => t.name).join(', ')})` : ''}`
+  );
 
   // Auto-update ticket status based on PR state
   if (referencedTickets.length > 0 && action === 'closed' && pull_request.merged) {
@@ -380,12 +411,12 @@ Note: Full diff not available (private repo requires authentication)`;
           data: { ticketStatus: 'done' },
         });
 
-        await logAuditEvent({
-          userId: 'system',
-          projectId: project.id,
-          header: 'Ticket Auto-Completed',
-          description: `Ticket "${ticket.name}" marked as done (PR #${pull_request.number} merged)`,
-        });
+        const { logSystemEvent } = await import('@/lib/audit');
+        await logSystemEvent(
+          project.id,
+          'Ticket Auto-Completed',
+          `Ticket "${ticket.name}" marked as done (PR #${pull_request.number} merged)`
+        );
       }
     }
   }
@@ -578,13 +609,43 @@ Note: Full diff not available (private repo requires authentication)`;
           });
           
           // Import AI analysis function
-          const { analyzeCommit } = await import('@/lib/ai-analysis');
+          const { analyzeCommitWithTickets } = await import('@/lib/ai-analysis');
           
           // Get project context
           const projectContext = `${project.name}: ${project.description || 'No description'}`;
           
-          // Generate AI analysis
-          const analysis = await analyzeCommit(commit.message, commitDiff, projectContext);
+          // Fetch unlinked tickets for matching
+          const unlinkedTicketsRaw = await prisma.ticket.findMany({
+            where: {
+              projectId: project.id,
+              ticketStatus: { in: ['todo', 'in_progress'] },
+              // Tickets without any linked commits, PRs, or branches
+              commits: { none: {} },
+              pullRequests: { none: {} },
+              githubBranches: { none: {} }
+            },
+            select: {
+              id: true,
+              name: true,
+              description: true
+            }
+          });
+
+          // Convert null descriptions to undefined for TypeScript compatibility
+          const unlinkedTickets = unlinkedTicketsRaw.map(ticket => ({
+            ...ticket,
+            description: ticket.description || undefined
+          }));
+          
+          // Log ticket matching context for debugging
+          console.log(`🎯 Ticket Matching Context for commit: ${commit.message.split('\n')[0]}`);
+          console.log(`📋 Found ${unlinkedTickets.length} unlinked tickets to match against:`);
+          unlinkedTickets.forEach((ticket, idx) => {
+            console.log(`  ${idx + 1}. "${ticket.name}" ${ticket.description ? `(${ticket.description.substring(0, 50)}...)` : '(no description)'}`);
+          });
+          
+          // Generate AI analysis with ticket matching
+          const analysis = await analyzeCommitWithTickets(commit.message, commitDiff, unlinkedTickets, projectContext);
           
           // Update commit with AI analysis and completed status
           await prisma.commit.update({
@@ -594,6 +655,31 @@ Note: Full diff not available (private repo requires authentication)`;
               aiAnalysisStatus: 'completed'
             }
           });
+
+          // Handle potential ticket matches
+          if (analysis.potentialMatches && analysis.potentialMatches.length > 0) {
+            console.log(`🎯 Found ${analysis.potentialMatches.length} potential ticket matches for commit ${commit.id}`);
+            
+            // For high confidence matches (0.8+), mark tickets as having potential matches
+            for (const match of analysis.potentialMatches) {
+              if (match.confidence >= 0.8) {
+                console.log(`🔗 High confidence match: ${match.ticketTitle} (${Math.round(match.confidence * 100)}%)`);
+                
+                await prisma.ticket.update({
+                  where: { id: match.ticketId },
+                  data: { potentialCommit: true }
+                });
+                
+                // Log the potential match
+                const { logSystemEvent } = await import('@/lib/audit');
+                await logSystemEvent(
+                  project.id,
+                  'Potential Ticket Match Found',
+                  `AI suggests linking commit "${commit.message.split('\n')[0]}" to ticket "${match.ticketTitle}" (${Math.round(match.confidence * 100)}% confidence)`
+                );
+              }
+            }
+          }
           
           console.log(`✅ AI analysis completed for commit: ${commit.id}`);
           
@@ -617,12 +703,12 @@ Note: Full diff not available (private repo requires authentication)`;
           }
           
           // Log AI analysis audit event
-          await logAuditEvent({
-            userId: 'system',
-            projectId: project.id,
-            header: 'AI Analysis Generated',
-            description: `Auto-generated AI analysis for commit: ${analysis.summary}`,
-          });
+          const { logSystemEvent: logSystemEventForAnalysis } = await import('@/lib/audit');
+          await logSystemEventForAnalysis(
+            project.id,
+            'AI Analysis Generated',
+            `Auto-generated AI analysis for commit: ${analysis.summary}`
+          );
           
         } catch (error) {
           console.error(`❌ AI analysis failed for commit ${commit.id}:`, error);
@@ -637,12 +723,12 @@ Note: Full diff not available (private repo requires authentication)`;
 
       // Log audit event for significant commits (not tiny changes)
       if (additions + deletions > 5) {
-        await logAuditEvent({
-          userId: 'system',
-          projectId: project.id,
-          header: 'Commit Pushed',
-          description: `${commit.author.name} pushed "${commit.message.split('\n')[0]}" to ${branchName}${referencedTickets.length > 0 ? ` (linked to ${referencedTickets.map(t => t.name).join(', ')})` : ''}`,
-        });
+        const { logSystemEvent } = await import('@/lib/audit');
+        await logSystemEvent(
+          project.id,
+          'Commit Pushed',
+          `${commit.author.name} pushed "${commit.message.split('\n')[0]}" to ${branchName}${referencedTickets.length > 0 ? ` (linked to ${referencedTickets.map(t => t.name).join(', ')})` : ''}`
+        );
       }
     }
   }
